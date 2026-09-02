@@ -36,8 +36,10 @@ class AndroidImageDownloader @Inject constructor(
             Request.Builder().url(imageUrl).build().runCatching {
                 okHttpClient.newCall(this).execute().run {
 
-                    val fileName = URLUtil.guessFileName(
-                        imageUrl, header("Content-Disposition"), body.contentType()?.toString()
+                    val fileName = sanitizeFileName(
+                        URLUtil.guessFileName(
+                            imageUrl, header("Content-Disposition"), body.contentType()?.toString()
+                        )
                     )
 
                     val relativePath =
@@ -90,6 +92,15 @@ class AndroidImageDownloader @Inject constructor(
 
     }
 
+    private fun sanitizeFileName(fileName: String): String {
+        if (fileName.length <= MAX_FILENAME_LENGTH) return fileName
+        val dot = fileName.lastIndexOf('.')
+        val ext = if (dot > 0 && fileName.length - dot in 2..10) fileName.substring(dot) else ""
+        val base = if (ext.isEmpty()) fileName else fileName.substring(0, dot)
+        val maxBaseLength = (MAX_FILENAME_LENGTH - ext.length).coerceAtLeast(1)
+        return base.take(maxBaseLength) + ext
+    }
+
     @DeprecatedSinceApi(29)
     private fun Response.saveImageForAndroidP(
         fileName: String,
@@ -108,5 +119,9 @@ class AndroidImageDownloader @Inject constructor(
         }
 
         return contentUri
+    }
+
+    private companion object {
+        const val MAX_FILENAME_LENGTH = 200
     }
 }
