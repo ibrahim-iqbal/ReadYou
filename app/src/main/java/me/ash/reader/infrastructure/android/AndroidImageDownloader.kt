@@ -20,6 +20,7 @@ import okhttp3.Request
 import okhttp3.Response
 import java.io.FileOutputStream
 import java.io.IOException
+import java.lang.Character
 import javax.inject.Inject
 import kotlin.io.path.Path
 import kotlin.io.path.createFile
@@ -92,13 +93,32 @@ class AndroidImageDownloader @Inject constructor(
 
     }
 
-    private fun sanitizeFileName(fileName: String): String {
-        if (fileName.length <= MAX_FILENAME_LENGTH) return fileName
+    // ENAMETOOLONG is a limit on encoded bytes (NAME_MAX = 255 on ext4/f2fs), not on
+    // Kotlin/UTF-16 character count. A filename guessed from feed content can contain
+    // any script, so truncating by .length alone can still leave a >255-byte name for
+    // CJK, Cyrillic, emoji, etc. — truncate by UTF-8 byte length instead, one whole
+    // code point at a time so a surrogate pair or multi-byte sequence is never split.
+    internal fun sanitizeFileName(fileName: String): String {
+        if (fileName.toByteArray(Charsets.UTF_8).size <= MAX_FILENAME_BYTES) return fileName
         val dot = fileName.lastIndexOf('.')
         val ext = if (dot > 0 && fileName.length - dot in 2..10) fileName.substring(dot) else ""
         val base = if (ext.isEmpty()) fileName else fileName.substring(0, dot)
-        val maxBaseLength = (MAX_FILENAME_LENGTH - ext.length).coerceAtLeast(1)
-        return base.take(maxBaseLength) + ext
+        val maxBaseBytes = (MAX_FILENAME_BYTES - ext.toByteArray(Charsets.UTF_8).size).coerceAtLeast(1)
+        return truncateToUtf8ByteLimit(base, maxBaseBytes) + ext
+    }
+
+    private fun truncateToUtf8ByteLimit(text: String, maxBytes: Int): String {
+        var byteCount = 0
+        var charIndex = 0
+        while (charIndex < text.length) {
+            val codePoint = text.codePointAt(charIndex)
+            val codePointChars = Character.charCount(codePoint)
+            val codePointBytes = String(Character.toChars(codePoint)).toByteArray(Charsets.UTF_8).size
+            if (byteCount + codePointBytes > maxBytes) break
+            byteCount += codePointBytes
+            charIndex += codePointChars
+        }
+        return text.substring(0, charIndex)
     }
 
     @DeprecatedSinceApi(29)
@@ -122,6 +142,6 @@ class AndroidImageDownloader @Inject constructor(
     }
 
     private companion object {
-        const val MAX_FILENAME_LENGTH = 200
+        const val MAX_FILENAME_BYTES = 200
     }
 }
